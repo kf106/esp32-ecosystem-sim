@@ -1,5 +1,6 @@
 #include <TFT_eSPI.h>
 #include <math.h>
+#include "audio_sfx.h"
 
 TFT_eSPI tft = TFT_eSPI();
 TFT_eSprite img = TFT_eSprite(&tft);
@@ -283,12 +284,18 @@ void core0Task(void * pvParameters) {
         float dx = garbages[targetG].x - decomps[i].x; float dy = garbages[targetG].y - decomps[i].y;
         float distSq = dx*dx + dy*dy;
         if(distSq > 0) { float invMag = Q_rsqrt(distSq); decomps[i].vx = (decomps[i].vx * 0.95f) + (dx*invMag * 0.1f); decomps[i].vy = (decomps[i].vy * 0.95f) + (dy*invMag * 0.1f); }
-        if(minDist < 36) { garbages[targetG].active = false; decomps[i].energy += 20; decomps[i].flash = 1.0f; }
+        if(minDist < 36) {
+          garbages[targetG].active = false; decomps[i].energy += 20; decomps[i].flash = 1.0f;
+          sfx_play(SFX_EAT_GARBAGE);
+        }
       } else if(targetS != -1) {
         float dx = spores[targetS].x - decomps[i].x; float dy = spores[targetS].y - decomps[i].y;
         float distSq = dx*dx + dy*dy;
         if(distSq > 0) { float invMag = Q_rsqrt(distSq); decomps[i].vx = (decomps[i].vx * 0.95f) + (dx*invMag * 0.1f); decomps[i].vy = (decomps[i].vy * 0.95f) + (dy*invMag * 0.1f); }
-        if(minDist < 36) { spores[targetS].active = false; decomps[i].energy += 20; decomps[i].flash = 1.0f; }
+        if(minDist < 36) {
+          spores[targetS].active = false; decomps[i].energy += 20; decomps[i].flash = 1.0f;
+          sfx_play(SFX_EAT_SPORE);
+        }
       } else {
         decomps[i].vx += (random(0, 100) * (1.0f / 500.0f)) - 0.1f; decomps[i].vy += (random(0, 100) * (1.0f / 500.0f)) - 0.1f;
       }
@@ -393,6 +400,7 @@ void core0Task(void * pvParameters) {
           plants[target].active = false;
           herbs[i].energy += 30; herbs[i].flash = 1.0f; 
           spawnExplosion(plants[target].x, plants[target].y, 150, 255, 150, 5, 0.5f); // 草食エフェクト
+          sfx_play(SFX_EAT_PLANT);
         }
       } else {
         herbs[i].vx += (random(0, 100) * (1.0f / 500.0f)) - 0.1f; herbs[i].vy += (random(0, 100) * (1.0f / 500.0f)) - 0.1f;
@@ -447,6 +455,7 @@ void core0Task(void * pvParameters) {
         } else {
           spawnExplosion(herbs[i].x, herbs[i].y, 0, 255, 255, 5, 0.5f); // 通常死爆発
           spawnGarbage(herbs[i].x, herbs[i].y, 0, 255, 255);
+          sfx_play(SFX_EAT_HERB); // once on death (predation or starvation)
         }
       } else if (herbs[i].energy > 120 && !herbs[i].infected) {
         herbs[i].energy -= 50;
@@ -486,6 +495,7 @@ void core0Task(void * pvParameters) {
           herbs[carns[i].targetId].vx *= 0.2f; herbs[carns[i].targetId].vy *= 0.2f;
           // 血飛沫（たまに出る）
           if(random(0,100) < 30) spawnExplosion(herbs[carns[i].targetId].x, herbs[carns[i].targetId].y, 0, 255, 255, 1, 0.4f);
+          // no per-nibble SFX — too spammy
         }
       } else {
         carns[i].vx += (random(0, 100) * (1.0f / 500.0f)) - 0.1f; carns[i].vy += (random(0, 100) * (1.0f / 500.0f)) - 0.1f;
@@ -519,6 +529,7 @@ void core0Task(void * pvParameters) {
         carns[i].active = false;
         spawnExplosion(carns[i].x, carns[i].y, 255, 50, 150, 8, 0.8f);
         spawnGarbage(carns[i].x, carns[i].y, 255, 50, 150);
+        sfx_play(SFX_EAT_CARN); // once on death
       } else if (carns[i].energy > 150) {
         carns[i].energy -= 70;
         spawnCarn(carns[i].x, carns[i].y, carns[i].speedLimit);
@@ -556,7 +567,8 @@ void core0Task(void * pvParameters) {
           // 丸呑みではなく、少しもみ合いになる
           apex[i].vx *= 0.6f; apex[i].vy *= 0.6f;
           carns[apex[i].targetId].vx *= 0.1f; carns[apex[i].targetId].vy *= 0.1f;
-          if(random(0,100) < 40) spawnExplosion(carns[apex[i].targetId].x, carns[apex[i].targetId].y, 255, 50, 150, 2, 0.6f); 
+          if(random(0,100) < 40) spawnExplosion(carns[apex[i].targetId].x, carns[apex[i].targetId].y, 255, 50, 150, 2, 0.6f);
+          // no per-nibble SFX — too spammy
         }
       } else {
         apex[i].vx += (random(0, 100) * (1.0f / 500.0f)) - 0.1f; apex[i].vy += (random(0, 100) * (1.0f / 500.0f)) - 0.1f;
@@ -591,6 +603,8 @@ void core0Task(void * pvParameters) {
 // Core 1 Task
 // ==========================================
 void setup() {
+  Serial.begin(115200);
+
   tft.init();
   tft.setRotation(1);       // landscape 320x240 on 240x320 panel
   tft.invertDisplay(true);  // ES3N28P ILI9341 needs inversion (else bg white, cyan→red)
@@ -602,6 +616,8 @@ void setup() {
 
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH);
+
+  sfx_begin();
 
   dataMutex = xSemaphoreCreateMutex();
 
@@ -622,6 +638,8 @@ void setup() {
 }
 
 void loop() {
+  sfx_poll();
+
   xSemaphoreTake(dataMutex, portMAX_DELAY);
   
   // 物理演算はすべてCore 0 (core0Task) の超高速ループへ完全移行しました！
